@@ -1,0 +1,454 @@
+<template>
+  <div class="student-app">
+    <!-- Header -->
+    <div class="app-header">
+      <div class="net-top"><NetworkStatus /></div>
+      <h1>🧑‍🎓 学习小天地</h1>
+      <p class="sub">不懂就问，天天向上！</p>
+      <div class="points-bar">
+        <span class="points-num" :class="{bounce: ptBounce}">⭐ {{ points }}</span>
+        <span class="streak">🔥 连续 {{ streak }} 天</span>
+      </div>
+      <div class="badge-wall" style="margin-top:8px">
+        <span v-for="b in badges" :key="b.name" class="badge-item">{{ b.icon }} {{ b.name }}</span>
+      </div>
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+
+      <!-- ===== 拍题 ===== -->
+      <div v-show="tab==='solve'">
+        <div class="card">
+          <div class="card-header"><span class="icon">📷</span><h3>拍题答疑</h3></div>
+          <p class="card-desc">拍照上传题目，AI一步步讲给你听</p>
+          <div class="upload-area" @click="$refs.fi.click()">
+            <div class="upload-icon">📸</div>
+            <div class="upload-text">点击拍照或选择图片</div>
+            <div class="upload-hint">支持 jpg / png</div>
+          </div>
+          <input ref="fi" type="file" accept="image/*" capture="environment" hidden @change="onFile" />
+          <img v-if="preview" :src="preview" class="preview-img" />
+          <button class="btn btn-primary btn-block mt-2" :disabled="!file||loading.solve" @click="doSolve">
+            <span v-if="loading.solve" class="spinner"></span>{{ loading.solve?'AI讲解中…':'开始解答 ✨' }}
+          </button>
+        </div>
+        <div v-if="solveResult" class="card">
+          <div class="card-header"><span class="icon">💡</span><h3>AI讲解</h3></div>
+          <div class="md" v-html="rendered"></div>
+          <div class="action-row">
+            <button class="btn btn-sm btn-secondary" @click="addWrong">📚 加入错题本 +10</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 错题本 ===== -->
+      <div v-show="tab==='wrong'">
+        <div class="card">
+          <div class="card-header"><span class="icon">📸</span><h3>上传错题</h3></div>
+          <div class="upload-area" @click="$refs.wrongFile.click()">
+            <div v-if="wrongPreview" class="preview-wrap">
+              <img :src="wrongPreview" class="preview-img" />
+            </div>
+            <div v-else>
+              <div class="upload-icon">📷</div>
+              <div class="upload-text">拍照或选择错题图片</div>
+            </div>
+          </div>
+          <input ref="wrongFile" type="file" accept="image/*" capture="environment" hidden @change="onWrongFile" />
+          <div class="form-group" style="margin-top:8px">
+            <select v-model="wrongSubject" style="margin-bottom:8px">
+              <option>数学</option><option>语文</option><option>英语</option>
+            </select>
+            <input v-model="wrongNote" placeholder="备注（选填）" />
+          </div>
+          <button class="btn btn-primary btn-block" :disabled="!wrongFileSelected||loading.wrongUpload" @click="uploadWrong">
+            {{ loading.wrongUpload?'上传中…':'上传错题 📤' }}
+          </button>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <button v-for="s in ['全部','数学','语文','英语']" :key="s"
+            class="btn btn-sm" :class="wFilter===s?'btn-primary':'btn-outline'" @click="wFilter=s">{{ s }}</button>
+        </div>
+        <div v-if="filteredWrong.length===0" class="empty">
+          <div class="emoji">🎉</div>
+          <p>还没有错题，继续保持！</p>
+        </div>
+        <div v-for="(w,i) in filteredWrong" :key="w.id" class="wrong-item" @click="wOpen=i">
+          <p class="wrong-q">{{ (w.question||w.q||'').slice(0,60) }}{{ w.q.length>60?'…':'' }}</p>
+          <div class="wrong-meta"><span>{{ w.subject||w.sub }}</span>·<span>{{ w.date }}</span></div>
+          <div v-if="w.image_path" style="margin-top:6px">
+            <img :src="w.image_path" style="max-width:100%;max-height:150px;border-radius:8px" />
+          </div>
+          <div v-if="wOpen===i" class="wrong-detail">
+            <div class="md" v-html="renderMd(w.explanation||w.expl)"></div>
+            <div class="action-row">
+              <button class="btn btn-sm btn-secondary" @click.stop="reviewWrong(w.id)">✅ 复习 +5</button>
+              <button class="btn btn-sm btn-ghost" @click.stop="delWrong(w.id)">🗑️</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 语音 ===== -->
+      <div v-show="tab==='voice'">
+        <div class="card">
+          <div class="card-header"><span class="icon">🎤</span><h3>语音问答</h3></div>
+          <p class="card-desc">按住说话提问，或打字也行</p>
+          <div class="mic-area">
+            <button class="mic-btn" :class="{recording:rec}" @mousedown="startRec" @mouseup="stopRec" @touchstart.prevent="startRec" @touchend="stopRec">🎙️</button>
+            <p class="mic-hint">{{ rec ? '松开停止录音' : (voiceText || '点击麦克风说话') }}</p>
+          </div>
+          <div class="form-group"><input v-model="voiceText" placeholder="或手动输入问题…" /></div>
+          <button class="btn btn-primary btn-block" :disabled="!voiceText.trim()||loading.voice" @click="askVoice">
+            <span v-if="loading.voice" class="spinner"></span>{{ loading.voice?'思考中…':'提问 💬' }}
+          </button>
+        </div>
+        <div v-if="voiceAnswer" class="card">
+          <div class="card-header"><span class="icon">🤖</span><h3>回答</h3></div>
+          <div class="chat-box">
+            <div class="chat-msg ai"><div class="chat-bubble">{{ voiceAnswer }}</div></div>
+          </div>
+          <button class="btn btn-sm btn-outline mt-2" @click="speak(voiceAnswer)">🔊 朗读</button>
+        </div>
+      </div>
+
+      <!-- ===== 树洞 ===== -->
+      <div v-show="tab==='mood'">
+        <div class="card">
+          <div class="card-header"><span class="icon">💬</span><h3>心情树洞</h3></div>
+          <p class="card-desc">今天心情怎么样？跟我说说吧～</p>
+          <div class="mood-grid">
+            <button v-for="m in moods" :key="m.key" class="mood-btn" :class="{active:selMood===m.key}" @click="selMood=m.key">{{ m.emoji }}</button>
+          </div>
+          <div class="form-group"><input v-model="moodMsg" placeholder="想说什么都可以…" @keyup.enter="doChat" /></div>
+          <button class="btn btn-primary btn-block" :disabled="!moodMsg.trim()||loading.mood" @click="doChat">
+            <span v-if="loading.mood" class="spinner"></span>{{ loading.mood?'想想怎么回…':'发送 💌' }}
+          </button>
+        </div>
+        <div v-if="chats.length" class="card">
+          <div class="card-header"><span class="icon">📝</span><h3>对话</h3></div>
+          <div class="chat-box">
+            <div v-for="(c,i) in chats" :key="i" class="chat-msg" :class="c.role">
+              <div class="chat-bubble">{{ c.text }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 成绩 ===== -->
+      <div v-show="tab==='scores'">
+        <div class="card">
+          <div class="card-header"><span class="icon">📊</span><h3>我的成绩</h3></div>
+          <p class="card-desc">成绩等级说明：A(90+) B(80+) C(70+) D(60+) E(不及格)</p>
+          <div v-if="myScores.length===0" class="empty"><div class="emoji">📝</div><p>暂无成绩</p></div>
+          <div v-for="s in myScores" :key="s.id" class="wrong-item">
+            <div class="flex">
+              <strong>{{ s.subject }}</strong>
+              <span class="tag" :class="gradeTag(s.grade)" style="font-size:18px;padding:4px 16px">{{ s.grade }}</span>
+            </div>
+            <p class="wrong-meta">{{ s.exam_name }} · {{ s.date }} · {{ s.term||'-' }}</p>
+          </div>
+        </div>
+        <div v-if="scoreChart.length" class="card">
+          <div class="card-header"><span class="icon">📈</span><h3>成绩趋势</h3></div>
+          <div v-for="c in scoreChart" :key="c.date+'_'+c.subject" class="flex" style="margin:8px 0">
+            <span class="tag" :class="gradeTag(c.grade)" style="font-size:14px">{{ c.grade }}</span>
+            <span style="font-size:13px">{{ c.exam_name }} · {{ c.subject }}</span>
+            <span class="muted" style="font-size:12px">{{ c.date }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 留言 ===== -->
+      <div v-show="tab==='msgs'">
+        <div class="card">
+          <div class="card-header"><span class="icon">✉️</span><h3>给老师留言</h3></div>
+          <div class="form-group">
+            <textarea v-model="msgContent" rows="3" placeholder="有问题想问老师？作业不会做？写在这里吧～"></textarea>
+          </div>
+          <button class="btn btn-primary" :disabled="!msgContent.trim()||loading.msg" @click="sendMsg" style="width:100%">
+            {{ loading.msg?'发送中…':'发送留言 💌' }}
+          </button>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="icon">📋</span><h3>我的留言</h3></div>
+          <div v-if="myMsgs.length===0" class="empty"><div class="emoji">💬</div><p>还没有留言</p></div>
+          <div v-for="m in myMsgs" :key="m.id" class="wrong-item">
+            <p style="font-weight:500">{{ m.content }}</p>
+            <p class="wrong-meta">{{ m.date }}</p>
+            <div v-if="m.reply" class="result-section" style="margin-top:8px;border-left-color:var(--c-green)">
+              <p style="font-size:13px;color:var(--c-green)"><strong>✅ 老师回复：</strong>{{ m.reply }}</p>
+            </div>
+            <div v-else class="muted" style="margin-top:8px;font-size:12px">⏳ 等待老师回复…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Nav -->
+    <nav class="bottom-nav">
+      <button v-for="t in tabs" :key="t.key" class="nav-tab" :class="{active:tab===t.key}" @click="tab=t.key">
+        <span class="nav-icon">{{ t.icon }}</span>
+        {{ t.label }}
+      </button>
+    </nav>
+
+    <!-- Badge popup -->
+    <div v-if="showBadge" class="badge-overlay" @click.self="showBadge=false">
+      <div class="badge-modal">
+        <div class="badge-big">{{ newBadge.icon }}</div>
+        <h3>🎉 解锁新徽章！</h3>
+        <p style="font-size:18px;font-weight:600;margin:8px 0">{{ newBadge.name }}</p>
+        <button class="btn btn-primary" @click="showBadge=false">太棒了！</button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted } from 'vue'
+import { marked } from 'marked'
+import { compressImage } from '../utils/compress.js'
+import NetworkStatus from '../components/NetworkStatus.vue'
+import { API_BASE } from '../config.js'
+
+function stuHeaders() {
+  const t = localStorage.getItem('kp_student_token')
+  return t ? { 'Authorization': 'Bearer ' + t } : {}
+}
+
+const tabs = [
+  {key:'solve', icon:'📷', label:'拍题'},
+  {key:'wrong', icon:'📚', label:'错题'},
+  {key:'voice', icon:'🎤', label:'语音'},
+  {key:'mood', icon:'💬', label:'树洞'},
+  {key:'scores', icon:'📊', label:'成绩'},
+  {key:'msgs', icon:'✉️', label:'留言'},
+]
+const tab = ref('solve')
+const loading = ref({})
+
+/* ===== 积分系统 ===== */
+const points = ref(10)
+const streak = ref(1)
+const badges = ref([{name:'初出茅庐', icon:'🌟'}])
+const ptBounce = ref(false)
+const showBadge = ref(false)
+const newBadge = ref({})
+
+const ALL_BADGES = [
+  {name:'初出茅庐', icon:'🌟', check:p=>true},
+  {name:'好学之星', icon:'📚', check:p=>p.q>=10},
+  {name:'连续7天', icon:'🔥', check:p=>p.s>=7},
+  {name:'错题消灭者', icon:'🎯', check:p=>p.rv>=10},
+  {name:'百分达人', icon:'🏆', check:p=>p.p>=100},
+]
+
+function loadProgress() {
+  try {
+    const d = JSON.parse(localStorage.getItem('kp_student')||'{}')
+    points.value = d.p||10; streak.value = d.s||1; badges.value = d.b||[{name:'初出茅庐', icon:'🌟'}]
+  } catch {}
+}
+function saveProgress() {
+  localStorage.setItem('kp_student', JSON.stringify({
+    p:points.value, s:streak.value, b:badges.value
+  }))
+}
+function addPts(n) {
+  points.value += n; ptBounce.value = true; setTimeout(()=>ptBounce.value=false,350)
+  incr('total_q',1); checkBadges(); saveProgress()
+}
+function incr(k) { const v = parseInt(localStorage.getItem('kps_'+k)||'0')+1; localStorage.setItem('kps_'+k,v); return v }
+function getP(k) { return parseInt(localStorage.getItem('kps_'+k)||'0') }
+function checkBadges() {
+  const profile = {p:points.value, s:streak.value, q:getP('total_q'), rv:getP('reviewed')}
+  for (const b of ALL_BADGES) {
+    if (b.check(profile) && !badges.value.find(e=>e.name===b.name)) {
+      badges.value.push({name:b.name, icon:b.icon}); newBadge.value = b; showBadge.value = true
+    }
+  }
+  saveProgress()
+}
+
+/* ===== 拍题 ===== */
+const file = ref(null)
+const preview = ref('')
+const solveResult = ref('')
+const rendered = computed(() => renderMd(solveResult.value))
+
+function onFile(e) {
+  const f = e.target.files?.[0]; if (!f) return
+  file.value = f; preview.value = URL.createObjectURL(f); solveResult.value = ''
+}
+async function doSolve() {
+  if (!file.value) return; loading.value.solve = true
+  try {
+    const comp = await compressImage(file.value)
+    const fd = new FormData(); fd.append('file', comp, file.value.name)
+    const h = stuHeaders(); const r = await fetch(API_BASE+'/api/student/solve',{method:'POST',headers:h,body:fd})
+    const d = await r.json(); solveResult.value = d.explanation||'解析失败'
+    addPts(10)
+  } catch(e) { solveResult.value = '请求失败：'+e.message }
+  loading.value.solve = false
+}
+
+/* ===== 错题本 ===== */
+const wFilter = ref('全部')
+const wOpen = ref(-1)
+const wrongBook = ref([])
+const filteredWrong = computed(() => wFilter.value==='全部'?wrongBook.value:wrongBook.value.filter(w=>(w.subject||w.sub)===wFilter.value))
+
+async function loadWrong() {
+  try {
+    const r = await fetch(API_BASE+'/api/student/wrong', {headers:stuHeaders()})
+    const d = await r.json(); wrongBook.value = Array.isArray(d) ? d : []
+  } catch { wrongBook.value = [] }
+}
+
+async function addWrong() {
+  if (!solveResult.value) return
+  const fd = new FormData()
+  fd.append('question', solveResult.value.slice(0,200))
+  fd.append('explanation', solveResult.value)
+  fd.append('subject', '数学')
+  const h = stuHeaders()
+  try {
+    const r = await fetch(API_BASE+'/api/student/wrong', {method:'POST', headers:{'Authorization':h.Authorization||''}, body: fd})
+    const d = await r.json()
+    if(d.ok) { addPts(10); loadWrong() }
+  } catch(e) { alert('添加失败') }
+}
+async function delWrong(id) {
+  await fetch(API_BASE+'/api/student/wrong/'+id, {method:'DELETE', headers:stuHeaders()})
+  loadWrong()
+}
+function reviewWrong(id) {
+  incr('reviewed'); addPts(5); alert('复习成功 +5⭐')
+  wOpen.value = -1
+}
+
+/* ===== 手动上传错题 ===== */
+const wrongFileSelected = ref(null)
+const wrongPreview = ref('')
+const wrongSubject = ref('数学')
+const wrongNote = ref('')
+
+function onWrongFile(e) {
+  const f = e.target.files?.[0]; if (!f) return
+  wrongFileSelected.value = f
+  wrongPreview.value = URL.createObjectURL(f)
+}
+async function uploadWrong() {
+  if (!wrongFileSelected.value) return; loading.value.wrongUpload = true
+  const comp = await compressImage(wrongFileSelected.value)
+  const fd = new FormData()
+  fd.append('file', comp, 'wrong.jpg')
+  fd.append('subject', wrongSubject.value)
+  fd.append('question', wrongNote.value || ('错题 - '+wrongSubject.value))
+  const h = stuHeaders()
+  try {
+    const r = await fetch(API_BASE+'/api/student/wrong', {method:'POST', headers:{'Authorization':h.Authorization||''}, body: fd})
+    const d = await r.json()
+    if(d.ok) { addPts(5); loadWrong(); wrongPreview.value=''; wrongFileSelected.value=null; wrongNote.value='' }
+  } catch(e) { alert('上传失败') }
+  loading.value.wrongUpload = false
+}
+}
+
+/* ===== 语音 ===== */
+const rec = ref(false)
+const voiceText = ref('')
+const voiceAnswer = ref('')
+let recognition = null
+
+function startRec() {
+  if (!('webkitSpeechRecognition' in window)&&!('SpeechRecognition' in window)) { alert('浏览器不支持语音识别'); return }
+  const SR = window.SpeechRecognition||window.webkitSpeechRecognition
+  recognition = new SR(); recognition.lang='zh-CN'; recognition.interimResults=false
+  recognition.onresult = e => voiceText.value = e.results[0][0].transcript
+  recognition.onerror = () => { rec.value=false }
+  recognition.start(); rec.value = true
+}
+function stopRec() { rec.value = false; recognition?.stop() }
+async function askVoice() {
+  if (!voiceText.value.trim()) return; loading.value.voice = true
+  try {
+    const r = await fetch(API_BASE+'/api/student/chat',{method:'POST',headers:{...stuHeaders(),'Content-Type':'application/json'},body:JSON.stringify({message:voiceText.value,mood:'neutral'})})
+    const d = await r.json(); voiceAnswer.value = d.reply||'没听清~'
+    if (!d.blocked) addPts(5)
+  } catch(e) { voiceAnswer.value = '请求失败' }
+  loading.value.voice = false
+}
+function speak(t) {
+  if (!window.speechSynthesis) return
+  const u = new SpeechSynthesisUtterance(t); u.lang='zh-CN'; u.rate=.9; speechSynthesis.speak(u)
+}
+
+/* ===== 树洞 ===== */
+const moods = [{emoji:'😊',key:'happy'},{emoji:'😐',key:'neutral'},{emoji:'😢',key:'sad'},{emoji:'😡',key:'angry'},{emoji:'😰',key:'anxious'}]
+const selMood = ref('neutral')
+const moodMsg = ref('')
+const chats = ref([])
+
+async function doChat() {
+  if (!moodMsg.value.trim()) return
+  chats.value.push({role:'user', text:moodMsg.value})
+  loading.value.mood = true
+  try {
+    const r = await fetch(API_BASE+'/api/student/chat',{method:'POST',headers:{...stuHeaders(),'Content-Type':'application/json'},body:JSON.stringify({message:moodMsg.value,mood:selMood.value})})
+    const d = await r.json()
+    chats.value.push({role:'ai', text:d.reply||'嗯嗯，我在听～'})
+    if (d.alert) chats.value.push({role:'ai', text:'💛 老师已收到你的消息，会来关心你的。如果需要帮助，可以拨打：\n📞 12355 青少年服务台\n📞 400-161-9995 全国心理援助热线'})
+    if (d.blocked) chats.value.push({role:'ai', text:'⚠️ 树洞功能已暂停，请找老师聊一聊。'})
+  } catch { chats.value.push({role:'ai', text:'我卡住了，再说一遍？'}) }
+  moodMsg.value = ''; loading.value.mood = false
+}
+
+/* ===== 工具 ===== */
+function renderMd(t) { try { return marked(t||'') } catch { return t||'' } }
+function gradeTag(g) { return {A:'tag-green',B:'tag-blue',C:'tag-orange',D:'tag-red',E:'tag-red'}[g]||'tag-blue' }
+
+/* ===== 成绩 ===== */
+const myScores = ref([])
+const scoreChart = ref([])
+async function loadMyScores() {
+  try {
+    const r = await fetch(API_BASE+'/api/student/scores', {headers:stuHeaders()})
+    const d = await r.json(); myScores.value = Array.isArray(d) ? d : []
+    const r2 = await fetch(API_BASE+'/api/student/scores/chart', {headers:stuHeaders()})
+    const d2 = await r2.json(); scoreChart.value = Array.isArray(d2) ? d2 : []
+  } catch {}
+}
+
+/* ===== 留言 ===== */
+const msgContent = ref('')
+const myMsgs = ref([])
+async function loadMyMsgs() {
+  try {
+    const r = await fetch(API_BASE+'/api/student/messages', {headers:stuHeaders()})
+    const d = await r.json(); myMsgs.value = Array.isArray(d) ? d : []
+  } catch {}
+}
+async function sendMsg() {
+  loading.value.msg = true
+  try {
+    await fetch(API_BASE+'/api/student/messages', {method:'POST',headers:{...stuHeaders(),'Content-Type':'application/json'},body:JSON.stringify({content:msgContent.value.trim()})})
+    msgContent.value = ''; loadMyMsgs()
+    alert('✅ 已发送，等待老师回复')
+  } catch(e) { alert('发送失败') }
+  loading.value.msg = false
+}
+
+onMounted(() => { loadProgress(); loadWrong(); loadMyScores(); loadMyMsgs() })
+</script>
+
+<style scoped>
+.badge-overlay { position:fixed; inset:0; background:rgba(0,0,0,.35); display:flex; align-items:center; justify-content:center; z-index:999; }
+.badge-modal { background:#fff; border-radius:24px; padding:32px; text-align:center; animation:pop .3s ease; width:300px; }
+.badge-big { font-size:72px; }
+.badge-modal h3 { margin:8px 0 4px; font-size:20px; }
+@keyframes pop { 0%{transform:scale(.5);opacity:0} 100%{transform:scale(1);opacity:1} }
+</style>
