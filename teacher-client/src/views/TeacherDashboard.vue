@@ -150,7 +150,7 @@
             <span v-if="loading.report" class="spinner"></span>
             {{ loading.report ? '生成中…' : '生成简报 ✨' }}
           </button>
-          <div v-if="reportText" class="report-preview">{{ reportText }}</div>
+          <div v-if="reportText" class="report-preview md" v-html="renderMd(reportText)"></div>
           <div v-if="reportText" class="action-row">
             <button class="btn btn-sm btn-outline" @click="copy(reportText)">📋 复制</button>
           </div>
@@ -175,7 +175,7 @@
             <span v-if="loading.weekly" class="spinner"></span>
             {{ loading.weekly ? '生成中…' : '生成周报 📄' }}
           </button>
-          <div v-if="weeklyText" class="report-preview">{{ weeklyText }}</div>
+          <div v-if="weeklyText" class="report-preview md" v-html="renderMd(weeklyText)"></div>
           <div v-if="weeklyText" class="action-row">
             <button class="btn btn-sm btn-outline" @click="download(weeklyText)">⬇️ 下载 TXT</button>
           </div>
@@ -380,7 +380,7 @@
           <button class="btn btn-primary" :disabled="loading.exam" @click="genExam">
             <span v-if="loading.exam" class="spinner"></span>{{ loading.exam?'生成中…':'生成试卷 ✨' }}
           </button>
-          <div v-if="examResult" class="report-preview" style="margin-top:12px">{{ examResult }}</div>
+          <div v-if="examResult" class="report-preview md" style="margin-top:12px" v-html="renderMd(examResult)"></div>
           <div v-if="examResult" class="action-row">
             <button class="btn btn-sm btn-outline" @click="copy(examResult)">📋 复制</button>
           </div>
@@ -601,6 +601,7 @@ import { ref, computed, onMounted, reactive, watch } from 'vue'
 import NetworkStatus from '../components/NetworkStatus.vue'
 import { API_BASE } from '../config.js'
 import { marked } from 'marked'
+import katex from 'katex'
 import * as XLSX from 'xlsx'
 
 function authHeaders() {
@@ -851,7 +852,21 @@ async function selectStudent(s) {
 async function genStuReport(s) {
 }
 
-function renderMd(t) { try { return marked(t||'') } catch { return t||'' } }
+function renderMd(t) {
+  if (!t) return ''
+  let html = t
+  // Block math: $$...$$
+  html = html.replace(/\$\$([\s\S]+?)\$\$/g, (_, tex) => {
+    try { return '<div class="katex-block">' + katex.renderToString(tex.trim(), {displayMode:true,throwOnError:false}) + '</div>' }
+    catch { return '$$' + tex + '$$' }
+  })
+  // Inline math: $...$
+  html = html.replace(/\$([^$]+?)\$/g, (_, tex) => {
+    try { return katex.renderToString(tex.trim(), {displayMode:false,throwOnError:false}) }
+    catch { return '$' + tex + '$' }
+  })
+  return marked(html)
+}
 
 /* 统计每个学生做题数 */
 async function loadSolvedCounts() {
@@ -864,6 +879,8 @@ async function loadSolvedCounts() {
 /* ====== 风险学生 ====== */
 const atRiskStudents = ref([])
 async function loadAtRisk() {
+  const d = await authGet('/api/teacher/at-risk')
+  atRiskStudents.value = Array.isArray(d) ? d : []
 }
 async function unblockStudent(id) {
   if (!confirm('确认该学生风险已解除？将恢复树洞使用权限。')) return
