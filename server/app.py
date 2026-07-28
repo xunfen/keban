@@ -557,10 +557,12 @@ def add_wrong():
             img_path = '/uploads/' + name
     d = request.form.to_dict() if not request.is_json else (request.get_json() or {})
     db = get_db()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M')
     db.execute('INSERT INTO wrong_questions(user_id,student_name,image_path,subject,question,explanation,date) VALUES(?,?,?,?,?,?,?)',
                (user['id'], user.get('display_name','') or user['username'], img_path,
-                d.get('subject','数学'), d.get('question',''), d.get('explanation',''),
-                datetime.now().strftime('%Y-%m-%d %H:%M')))
+                d.get('subject','数学'), d.get('question',''), d.get('explanation',''), now))
+    db.execute('INSERT INTO points_log(user_id,points,type,reason,created_at) VALUES(?,?,?,?,?)',
+               (user['id'], 10, 'earn', '添加错题 +10分', now))
     db.commit(); db.close()
     return jsonify({'ok':True})
 
@@ -605,10 +607,12 @@ def wrong_upload():
             f.write(base64.b64decode(data))
         img_path = '/uploads/' + name
     db = get_db()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M')
     db.execute('INSERT INTO wrong_questions(user_id,student_name,image_path,subject,question,explanation,date) VALUES(?,?,?,?,?,?,?)',
                (user['id'], user.get('display_name','') or user['username'], img_path,
-                subject, note or '', '',
-                datetime.now().strftime('%Y-%m-%d %H:%M')))
+                subject, note or '', '', now))
+    db.execute('INSERT INTO points_log(user_id,points,type,reason,created_at) VALUES(?,?,?,?,?)',
+               (user['id'], 10, 'earn', '上传错题 +10分', now))
     db.commit(); db.close()
     return jsonify({'ok':True})
 
@@ -639,8 +643,11 @@ def student_solve():
     img_path = '/uploads/' + name
     text = solve_question(path)
     db = get_db()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M')
     db.execute('INSERT INTO questions(user_id,student_name,subject,date,content,image_path,is_correct) VALUES(?,?,?,?,?,?,?)',
-               (user['id'], user.get('display_name','') or user['username'], '数学', datetime.now().strftime('%Y-%m-%d'), text, img_path, 1))
+               (user['id'], user.get('display_name','') or user['username'], '数学', now, text, img_path, 1))
+    db.execute('INSERT INTO points_log(user_id,points,type,reason,created_at) VALUES(?,?,?,?,?)',
+               (user['id'], 5, 'earn', '拍题解题 +5分', now))
     db.commit(); db.close()
     return jsonify({'ok':True, 'explanation':text, 'image_path': img_path})
 
