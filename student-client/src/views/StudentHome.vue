@@ -83,7 +83,9 @@
             <div v-if="w.image_path" style="margin-bottom:10px">
               <img :src="w.image_path" style="max-width:100%;border-radius:8px" />
             </div>
-            <div class="md" v-html="renderMd(w.explanation||w.expl||'')"></div>
+            <div v-if="w.question" class="md" v-html="renderMd(w.question)"></div>
+            <div v-if="w.explanation||w.expl" class="md" style="margin-top:10px;padding-top:10px;border-top:1px solid #eee" v-html="renderMd(w.explanation||w.expl||'')"></div>
+            <div v-if="!w.question&&!w.explanation&&!w.expl" class="md" style="color:#999">暂无内容</div>
             <div class="action-row">
               <button class="btn btn-sm btn-ghost" @click.stop="delWrong(w.id)">🗑️ 删除</button>
             </div>
@@ -288,6 +290,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { marked } from 'marked'
+import katex from 'katex'
 import { compressImage } from '../utils/compress.js'
 import NetworkStatus from '../components/NetworkStatus.vue'
 import { API_BASE } from '../config.js'
@@ -464,7 +467,19 @@ const wOpen = ref(-1)
 let wrongList = []
 
 function renderMd(t) {
-  return t ? marked(t) : ''
+  if (!t) return ''
+  let html = t
+  // Block math: $$...$$
+  html = html.replace(/\$\$([\s\S]+?)\$\$/g, (_, tex) => {
+    try { return '<div class="katex-block">' + katex.renderToString(tex.trim(), {displayMode:true,throwOnError:false}) + '</div>' }
+    catch { return '$$' + tex + '$$' }
+  })
+  // Inline math: $...$
+  html = html.replace(/\$([^$]+?)\$/g, (_, tex) => {
+    try { return katex.renderToString(tex.trim(), {displayMode:false,throwOnError:false}) }
+    catch { return '$' + tex + '$' }
+  })
+  return marked(html)
 }
 
 function onWrongFile(e) {
