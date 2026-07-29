@@ -673,6 +673,8 @@ function diffTag(d) { return d==='易'?'tag-green':d==='中'?'tag-orange':'tag-r
 const stats = ref(null); const statsDays = ref(7)
 async function loadStats(d) {
   statsDays.value = d
+  const res = await authGet('/api/teacher/stats?days=' + d)
+  stats.value = res || null
 }
 function barH(c) {
   const mx = Math.max(...(stats.value?.daily_trend||[]).map(d=>d.count),1)
